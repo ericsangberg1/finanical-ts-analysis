@@ -1,0 +1,232 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from statsmodels.graphics.tsaplots import plot_acf
+
+os.getcwd()
+os.chdir("/Users/axelivarsson/Desktop/FTS")
+
+# Läs in data
+df = pd.read_csv("spiff_data-2.csv")
+
+if "Unnamed: 0" in df.columns:
+    df = df.drop(columns=["Unnamed: 0"])
+
+asset_cols = [col for col in df.columns if col != "day"]
+
+# Viktigt: använd np.nan, inte pd.NA
+df[asset_cols] = df[asset_cols].replace(1000, np.nan)
+
+# Se till att kolumnerna verkligen är numeriska
+df[asset_cols] = df[asset_cols].apply(pd.to_numeric, errors="coerce")
+
+df = df.set_index("day")
+
+plt.figure(figsize=(8, 6))
+
+for col in df.columns:
+    plt.plot(df.index, df[col], linewidth=1.8, label=col)
+
+plt.xlabel("Day")
+plt.ylabel("Price")
+plt.ylim(0, 22)
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show() # Prices appear non-stationary, with no constant mean
+# tranquility upward trend, but volatile
+# water and gurkor steady upward trend, not so volatile
+# guitars varying seasonally
+# sugar rather steady downward trend
+# trends vary a lot, also volatility
+# around day 4000 many stocks crash, but bounce back quite fast
+# some stocks seems to correlate
+#%%
+returns = df.pct_change()
+log_returns = np.log(df) - np.log(df.shift(1))
+plt.figure(figsize=(12, 6))
+
+for col in log_returns.columns:
+    plt.plot(log_returns.index, log_returns[col], alpha=0.5, linewidth=1, label=col)
+
+plt.title("Log-Returns")
+plt.xlabel("Day")
+plt.ylabel("Log-Return")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.show()
+# volatily clusters around 2500, 4000, 4800
+# some outliers across the plot
+# roughly symmetric around 0
+# extreme movements occur simultaneously
+# returns similar to log-return due to non-drastic changes
+#%%
+for col in df.columns:
+    
+    fig, axes = plt.subplots(2, 1, figsize=(10,6), sharex=True)
+    
+    # Returns
+    axes[0].plot(returns.index, returns[col])
+    axes[0].set_title(f"{col} - Returns")
+    axes[0].grid(True, alpha=0.3)
+    
+    # Log-returns
+    axes[1].plot(log_returns.index, log_returns[col])
+    axes[1].set_title(f"{col} - Log Returns")
+    axes[1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+
+#%%
+# =========================
+# 6. Histograms of log-returns
+# =========================
+fig, axes = plt.subplots(len(asset_cols), 1, figsize=(10, 18))
+
+for i, col in enumerate(asset_cols):
+    axes[i].hist(log_returns[col].dropna(), bins=50)
+    axes[i].set_title(f"{col} - Histogram of Log Returns")
+    axes[i].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+# all centered around 0
+# pointy top, deviates from normality, long tails
+# guitars and tranquility a bit skewed
+# heavy/fat tails for most
+# 
+#%%
+# =========================
+# 7. Summary statistics
+# =========================
+summary = pd.DataFrame({
+    "mean": log_returns.mean(),
+    "std": log_returns.std(),
+    "skew": log_returns.skew(),
+    "kurtosis": log_returns.kurtosis(),
+    "min": log_returns.min(),
+    "max": log_returns.max()
+})
+
+print("\nSummary statistics for log-returns:\n")
+print(summary.round(4))
+# most of them have 4-5 the volatility of gurkor and water
+# skewness slightly negative for all, suggesting heavier negative tails
+# normal distribution has kurtosis 0, stocks almost 0, sugar definitely not 0, suggesting heavy tails
+# and usage of GARCH instead of normal distribution
+# highest risk: sugar, guitar, tranquility
+# medium risk: stocks, slinshots
+# low risk: gurkor, water
+#%%
+# =========================
+# 8. Correlation matrix
+# =========================
+corr_matrix = log_returns.corr()
+
+print("\nCorrelation matrix of log-returns:\n")
+print(corr_matrix.round(3))
+# clear relationship between water and gurkor
+# slingshots and guitars
+# many negative correlations
+# group 1: gurkor, water (correlate)
+# group 2: guitars, slingshots, sugar, tranquility (correlate)
+# group 3: stocks (independent)
+
+# =========================
+# 9. Optional: ACF of returns and squared returns
+# =========================
+for col in asset_cols:
+    fig, axes = plt.subplots(2, 1, figsize=(10, 6))
+    
+    plot_acf(log_returns[col].dropna(), ax=axes[0], lags=40)
+    axes[0].set_title(f"{col} - ACF of Log Returns")
+    
+    plot_acf((log_returns[col].dropna() ** 2), ax=axes[1], lags=40)
+    axes[1].set_title(f"{col} - ACF of Squared Log Returns")
+    
+    plt.tight_layout()
+    plt.show()
+#%%
+from statsmodels.tsa.stattools import acf
+
+plt.figure(figsize=(10,6))
+
+for col in asset_cols:
+    acf_vals = acf(log_returns[col].dropna(), nlags=40)
+    plt.plot(acf_vals, label=col)
+
+plt.axhline(0, linestyle="--", color="black")
+plt.title("ACF of Log Returns (all assets)")
+plt.xlabel("Lag")
+plt.ylabel("ACF")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.show()
+
+plt.figure(figsize=(10,6))
+
+for col in asset_cols:
+    acf_vals = acf((log_returns[col].dropna()**2), nlags=40)
+    plt.plot(acf_vals, label=col)
+
+plt.axhline(0, linestyle="--", color="black")
+plt.title("ACF of Squared Log Returns (all assets)")
+plt.xlabel("Lag")
+plt.ylabel("ACF")
+plt.legend()
+plt.grid(alpha=0.3)
+plt.show()
+# low ACF in returns but high ACF in squared returns suggests predictable volatility
+# but not direction of trajectory
+# volatility clustering for guitars, slingshots, sugar seen by big dependence for small lag
+# variance not constant, GARCH behavior
+#%%
+log_returns["slingshots"].plot()
+log_returns["tranquillity"].plot()
+#%%
+acf_matrix = []
+
+for col in asset_cols:
+    acf_vals = acf((log_returns[col].dropna()**2), nlags=40)
+    acf_matrix.append(acf_vals)
+
+acf_mean = np.mean(acf_matrix, axis=0)
+
+plt.figure(figsize=(8,5))
+plt.plot(acf_mean)
+plt.axhline(0, linestyle="--")
+plt.title("Average ACF (Squared Log Returns)")
+plt.xlabel("Lag")
+plt.ylabel("ACF")
+plt.grid(alpha=0.3)
+plt.show()
+
+# 🔹 1. What patterns exist within the individual series?
+
+# The price series are clearly non-stationary, exhibiting trends and changing levels over time. In contrast, the return and log-return series appear approximately stationary, fluctuating around a constant mean close to zero. The mean of returns is small relative to their volatility, making any drift visually negligible in the return series.
+
+# A key feature observed across several assets is volatility clustering, where periods of high volatility are followed by further periods of high volatility. This is confirmed by the positive autocorrelation in squared returns.
+
+# The distributions of returns are leptokurtic, with pronounced peaks and moderately heavy tails, indicating a higher probability of extreme events than under a normal distribution. Additionally, most assets exhibit slight negative skewness, suggesting that large negative returns are more likely than large positive ones.
+
+# Finally, the volatility levels differ significantly across assets, with some series showing relatively stable dynamics (e.g. stocks, water) and others displaying more pronounced fluctuations (e.g. sugar, slingshots, guitars).
+
+# 🔹 2. What relationships exist between the different series?
+
+# The correlation analysis reveals both positive and negative relationships between the assets. In particular, gurkor and water exhibit a strong positive correlation, suggesting that they are influenced by similar underlying factors. Likewise, guitars and slingshots show a relatively strong positive relationship.
+
+# Some pairs of assets exhibit negative correlations, indicating that they tend to move in opposite directions. At the same time, the stock series appears largely uncorrelated with the other assets, suggesting that it follows a more independent dynamic.
+
+# Furthermore, several assets experience simultaneous increases in volatility, especially during periods of market stress (e.g. around day 4000), indicating the presence of common shocks affecting multiple series.
+
+# 🔹 3. Can the series be grouped?
+
+# Based on the correlation structure and volatility behavior, the assets can be grouped into distinct clusters.
+
+# One group consists of gurkor and water, which exhibit strong positive correlation and relatively low volatility. A second group includes guitars and slingshots, which are more volatile and strongly correlated with each other. Tranquillity also shows some similarity to this group, although less pronounced.
+
+# In contrast, the stock series appears largely independent from the others, forming its own group with relatively stable volatility and weak correlations.
+
+# These groupings suggest that the assets are driven by a combination of common and idiosyncratic factors.
